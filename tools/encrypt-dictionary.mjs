@@ -11,13 +11,15 @@
 // the two sides cannot disagree about formats.
 //
 // Usage:
-//   node tools/encrypt-dictionary.mjs [path/to/dictionary.json]
+//   python tools/parse_facit.py                  # src/*.pdf -> build/glossary.json
+//   node tools/encrypt-dictionary.mjs            # build/glossary.json -> dictionary.enc.json
 //   DICT_PASSWORD=... node tools/encrypt-dictionary.mjs   (non-interactive)
 //
-// Defaults to the desktop app's live dictionary.
+// The input is the glossary parsed from the teacher's facit PDFs: four
+// dictionaries, each split into chapters, each term carrying its colour
+// status, its correct translations and any merely tolerable ones.
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -35,32 +37,37 @@ const ITERATIONS = 600_000;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const output = resolve(here, "..", "dictionary.enc.json");
-const defaultSource = join(
-  homedir(),
-  "Library",
-  "Application Support",
-  "InterpreterAid",
-  "dictionary.json",
-);
+const defaultSource = resolve(here, "..", "build", "glossary.json");
 
-function loadEntries(path) {
+const STATUS_CODE = { green: "g", yellow: "y", red: "r" };
+
+// Compact form, to keep the download small on a phone:
+//   { v: 2, dictionaries: [{ id, name, chapters: [{ id, number, title,
+//     terms: [[sv, status, [correct...], [tolerable...]], ...] }] }] }
+// status is "g", "y", "r" or "" for an unmarked term.
+function loadGlossary(path) {
   const raw = JSON.parse(readFileSync(path, "utf8"));
-  const items = Array.isArray(raw)
-    ? raw
-    : Object.entries(raw).map(([term, payload]) => ({ source_term: term, ...payload }));
-
-  const entries = [];
-  for (const item of items) {
-    const term = String(item.source_term ?? "").trim();
-    const translation = String(item.translation ?? "").trim();
-    if (!term || !translation) continue;
-    let language = item.language ?? item.source_language;
-    if (language !== "sv" && language !== "ru") {
-      language = /[Ѐ-ӿ]/u.test(term) ? "ru" : "sv";
-    }
-    entries.push([term, translation, language, String(item.notes ?? "").trim()]);
+  if (raw.version !== 2 || !Array.isArray(raw.dictionaries)) {
+    throw new Error(`${path} is not a parsed glossary; run tools/parse_facit.py first`);
   }
-  return entries;
+  let terms = 0;
+  const dictionaries = raw.dictionaries.map((dictionary) => ({
+    id: dictionary.id,
+    name: dictionary.name,
+    chapters: dictionary.chapters.map((chapter) => ({
+      id: chapter.id,
+      number: chapter.number,
+      title: chapter.title,
+      terms: chapter.terms
+        .filter((term) => term.sv && (term.ru.length || term.ru_acceptable.length))
+        .map((term) => {
+          terms += 1;
+          return [term.sv, STATUS_CODE[term.status] ?? "", term.ru, term.ru_acceptable];
+        }),
+    })),
+  }));
+  if (terms === 0) throw new Error(`no terms in ${path}`);
+  return { content: { v: 2, dictionaries }, terms };
 }
 
 function askHidden(prompt) {
@@ -99,8 +106,7 @@ const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 
 async function main() {
   const source = resolve(process.argv[2] ?? defaultSource);
-  const entries = loadEntries(source);
-  if (entries.length === 0) throw new Error(`no usable entries in ${source}`);
+  const { content, terms } = loadGlossary(source);
 
   let password = process.env.DICT_PASSWORD;
   if (!password) {
@@ -112,7 +118,7 @@ async function main() {
 
   // Compressed before encryption, because ciphertext does not compress and
   // GitHub Pages' own gzip would then do nothing.
-  const plaintext = gzipSync(Buffer.from(JSON.stringify(entries), "utf8"), { level: 9 });
+  const plaintext = gzipSync(Buffer.from(JSON.stringify(content), "utf8"), { level: 9 });
 
   const salt = getRandomValues(new Uint8Array(16));
   const iv = getRandomValues(new Uint8Array(12));
@@ -128,7 +134,7 @@ async function main() {
   }
 
   const payload = {
-    v: 1,
+    v: 2,
     kdf: { name: "PBKDF2", hash: "SHA-256", iterations: ITERATIONS, salt: b64(salt) },
     cipher: { name: "AES-GCM", iv: b64(iv) },
     encoding: "gzip+json",
@@ -136,7 +142,7 @@ async function main() {
   };
   writeFileSync(output, JSON.stringify(payload));
   console.log(
-    `${entries.length} entries from ${source}\n` +
+    `${terms} terms in ${content.dictionaries.length} dictionaries from ${source}\n` +
       `-> ${output} (${(JSON.stringify(payload).length / 1024).toFixed(0)} KB)`,
   );
 }
