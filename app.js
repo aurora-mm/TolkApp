@@ -1,12 +1,13 @@
-// Unlock and search the encrypted dictionary entirely in the browser.
+// Unlock, search and practise the encrypted glossary entirely in the browser.
 //
 // The password is never compared against anything stored in this site. It is
 // stretched into an AES key with PBKDF2, and that key either decrypts
 // dictionary.enc.json or it does not. A wrong password is simply a key that
 // fails AES-GCM's authentication check.
 
-import { TermLookup } from "./lookup.js";
-import { DIRECTION_LABEL, ShuffleBag, answerLanguage, buildCards } from "./practice.js";
+import { decodeGlossary, lookupEntries, termsInScope } from "./glossary.js?v=0dab3c2a08";
+import { TermLookup } from "./lookup.js?v=a14f613f27";
+import { DIRECTION_LABEL, StratifiedPicker, buildDeck } from "./practice.js?v=68b69f5c26";
 
 const $ = (id) => document.getElementById(id);
 const lockView = $("lock");
@@ -18,12 +19,16 @@ const errorBox = $("lock-error");
 const queryInput = $("query");
 const results = $("results");
 const status = $("status");
+const dictionaryBar = $("dictionaries");
+const chapterSelect = $("chapter");
+const oddsLine = $("odds");
 
 const modeButtons = { search: $("mode-search"), practice: $("mode-practice") };
 const panels = { search: $("panel-search"), practice: $("panel-practice") };
 const flashcard = $("flashcard");
 const frontFace = flashcard.querySelector(".front");
 const backFace = flashcard.querySelector(".back");
+const frontStatus = $("front-status");
 const frontDirection = $("front-direction");
 const frontTerm = $("front-term");
 const backTerm = $("back-term");
@@ -32,10 +37,18 @@ const progress = $("progress");
 const nextCardButton = $("next-card");
 const announcer = $("card-announcer");
 
+// Only selections are remembered, never any of the glossary itself.
 const MODE_KEY = "ordlista.mode";
+const DICTIONARY_KEY = "ordlista.dictionary";
+const CHAPTERS_KEY = "ordlista.chapters";
 
-let lookup = null;
-let bag = null;
+const STATUS_NAME = { green: "grönt", yellow: "gult", red: "rött", none: "omärkt" };
+
+let glossary = [];
+let dictionary = null;
+const lookups = new Map();
+let picker = null;
+let scopeTerms = 0;
 let currentCard = null;
 
 // Start downloading while the user types the password.
@@ -45,11 +58,31 @@ const payloadPromise = fetch("dictionary.enc.json", { cache: "no-cache" }).then(
 });
 
 const fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+const formatNumber = (n) => n.toLocaleString("sv-SE");
+
+function readStore(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : JSON.parse(value);
+  } catch {
+    return fallback; // Storage can be blocked; the page must still work.
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Not worth surfacing: remembering selections is only a convenience.
+  }
+}
 
 function showError(message) {
   errorBox.textContent = message;
   errorBox.hidden = false;
 }
+
+// --------------------------------------------------------------- unlock
 
 async function deriveKey(password, kdf) {
   const material = await crypto.subtle.importKey(
@@ -75,7 +108,10 @@ async function gunzip(bytes) {
 
 async function unlock(password) {
   const payload = await payloadPromise;
-  if (payload.v !== 1) throw new Error("okänt filformat");
+  // A newer file than this page understands means the browser is still holding
+  // the previous version of the page from its cache.
+  if (payload.v > 2) throw new Error("sidan har uppdaterats – ladda om sidan");
+  if (payload.v !== 2) throw new Error("okänt filformat");
   const key = await deriveKey(password, payload.kdf);
   let plaintext;
   try {
@@ -87,60 +123,7 @@ async function unlock(password) {
   } catch {
     return null; // Authentication failed: wrong password.
   }
-  const rows = JSON.parse(await gunzip(plaintext));
-  return rows.map(([source_term, translation, language, notes]) => ({
-    source_term,
-    translation,
-    language,
-    notes,
-  }));
-}
-
-function cell(text, className) {
-  const td = document.createElement("td");
-  td.textContent = text; // Never innerHTML: terms are data, not markup.
-  if (className) td.className = className;
-  return td;
-}
-
-function render() {
-  const query = queryInput.value;
-  results.replaceChildren();
-  if (!query.trim()) {
-    const row = document.createElement("tr");
-    const td = cell("Skriv för att söka.", "empty");
-    td.colSpan = 2;
-    row.append(td);
-    results.append(row);
-    return;
-  }
-  const hits = lookup.search(query);
-  if (hits.length === 0) {
-    const row = document.createElement("tr");
-    const td = cell("Inga träffar.", "empty");
-    td.colSpan = 2;
-    row.append(td);
-    results.append(row);
-    return;
-  }
-  for (const entry of hits) {
-    const row = document.createElement("tr");
-    const term = cell(entry.source_term);
-    term.title = entry.source_term;
-    term.lang = entry.language;
-    const translation = cell(entry.translation);
-    translation.title = entry.translation;
-    // Translations run the other way, so hyphenate them in the other language.
-    translation.lang = entry.language === "sv" ? "ru" : "sv";
-    if (entry.notes) {
-      const note = document.createElement("span");
-      note.className = "note";
-      note.textContent = entry.notes;
-      translation.append(note);
-    }
-    row.append(term, translation);
-    results.append(row);
-  }
+  return decodeGlossary(JSON.parse(await gunzip(plaintext)));
 }
 
 form.addEventListener("submit", async (event) => {
@@ -160,20 +143,20 @@ form.addEventListener("submit", async (event) => {
   unlockButton.disabled = true;
   unlockButton.textContent = "Öppnar …";
   try {
-    const entries = await unlock(password);
-    if (!entries) {
+    const decoded = await unlock(password);
+    if (!decoded) {
       showError("Fel lösenord.");
       passwordInput.select();
       return;
     }
-    lookup = new TermLookup(entries);
-    bag = new ShuffleBag(buildCards(entries));
+    glossary = decoded;
     passwordInput.value = "";
-    status.textContent = `${lookup.size.toLocaleString("sv-SE")} termer i ordlistan.`;
+    buildDictionaryBar();
     lockView.hidden = true;
     lookupView.hidden = false;
-    render();
-    setMode(rememberedMode());
+    const remembered = readStore(DICTIONARY_KEY, null);
+    selectDictionary(glossary.some((d) => d.id === remembered) ? remembered : glossary[0].id);
+    setMode(readStore(MODE_KEY, "search") === "practice" ? "practice" : "search");
   } catch (error) {
     showError(`Ordlistan kunde inte läsas in (${error.message}).`);
   } finally {
@@ -182,28 +165,160 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-queryInput.addEventListener("input", render);
+// ---------------------------------------------------------- dictionaries
 
-// ------------------------------------------------------------- modes
+function buildDictionaryBar() {
+  dictionaryBar.replaceChildren(
+    ...glossary.map((d) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "dictionary";
+      button.textContent = d.name;
+      button.dataset.id = d.id;
+      button.setAttribute("aria-pressed", "false");
+      button.addEventListener("click", () => {
+        selectDictionary(d.id);
+        (panels.practice.hidden ? queryInput : flashcard).focus({ preventScroll: true });
+      });
+      return button;
+    }),
+  );
+}
 
-function rememberedMode() {
-  try {
-    return localStorage.getItem(MODE_KEY) === "practice" ? "practice" : "search";
-  } catch {
-    return "search"; // Storage can be blocked; the page must still work.
+function lookupFor(d) {
+  if (!lookups.has(d.id)) lookups.set(d.id, new TermLookup(lookupEntries(d)));
+  return lookups.get(d.id);
+}
+
+function selectDictionary(id) {
+  dictionary = glossary.find((d) => d.id === id);
+  writeStore(DICTIONARY_KEY, id);
+  for (const button of dictionaryBar.children) {
+    button.setAttribute("aria-pressed", String(button.dataset.id === id));
+  }
+  status.textContent = `${formatNumber(termsInScope(dictionary).length)} termer i ${dictionary.name}.`;
+  renderSearch();
+  buildChapterSelect();
+}
+
+// -------------------------------------------------------------- search
+
+function cell(text) {
+  const td = document.createElement("td");
+  td.textContent = text; // Never innerHTML: terms are data, not markup.
+  return td;
+}
+
+function dot(statusName) {
+  const element = document.createElement("span");
+  element.className = `status-dot ${statusName}`;
+  element.title = STATUS_NAME[statusName] ?? "";
+  return element;
+}
+
+function messageRow(text) {
+  const row = document.createElement("tr");
+  const td = cell(text);
+  td.className = "empty";
+  td.colSpan = 2;
+  row.append(td);
+  return row;
+}
+
+function renderSearch() {
+  if (!dictionary) return;
+  const query = queryInput.value;
+  results.replaceChildren();
+  if (!query.trim()) {
+    results.append(messageRow("Skriv för att söka."));
+    return;
+  }
+  const hits = lookupFor(dictionary).search(query);
+  if (hits.length === 0) {
+    results.append(messageRow("Inga träffar."));
+    return;
+  }
+  for (const entry of hits) {
+    const row = document.createElement("tr");
+    if (entry.tolerable) row.className = "tolerable";
+    const term = cell("");
+    const translation = cell("");
+    const termText = Object.assign(document.createElement("span"), { textContent: entry.source_term });
+    const translationText = Object.assign(document.createElement("span"), { textContent: entry.translation });
+    term.title = entry.source_term;
+    translation.title = entry.translation;
+    term.lang = entry.language;
+    // Translations run the other way, so hyphenate them in the other language.
+    translation.lang = entry.language === "sv" ? "ru" : "sv";
+    // The teacher's colour belongs to the Swedish term, wherever it appears.
+    const swedish = entry.language === "sv" ? term : translation;
+    for (const [td, text] of [[term, termText], [translation, translationText]]) {
+      const wrapper = document.createElement("span");
+      wrapper.className = "term-cell";
+      if (td === swedish) wrapper.append(dot(entry.status));
+      wrapper.append(text);
+      td.append(wrapper);
+    }
+    row.append(term, translation);
+    results.append(row);
   }
 }
+
+queryInput.addEventListener("input", renderSearch);
+
+// ------------------------------------------------------------- chapters
+
+function rememberedChapter(d) {
+  const chosen = readStore(CHAPTERS_KEY, {})[d.id];
+  return d.chapters.some((c) => c.id === chosen) ? chosen : "all";
+}
+
+function buildChapterSelect() {
+  const option = (value, label) => Object.assign(document.createElement("option"), { value, textContent: label });
+  // Counts are distinct terms, the same number the practice line shows: the
+  // same term in two chapters is one term in "Alla kapitel".
+  const count = (id) => formatNumber(termsInScope(dictionary, id).length);
+  chapterSelect.replaceChildren(
+    option("all", `Alla kapitel (${count("all")})`),
+    ...dictionary.chapters.map((c) =>
+      option(c.id, `${c.number != null ? `${c.number}. ` : ""}${c.title} (${count(c.id)})`),
+    ),
+  );
+  chapterSelect.value = rememberedChapter(dictionary);
+  rebuildDeck();
+}
+
+chapterSelect.addEventListener("change", () => {
+  const chosen = readStore(CHAPTERS_KEY, {});
+  chosen[dictionary.id] = chapterSelect.value;
+  writeStore(CHAPTERS_KEY, chosen);
+  rebuildDeck();
+});
+
+function rebuildDeck() {
+  const terms = termsInScope(dictionary, chapterSelect.value);
+  scopeTerms = terms.length;
+  picker = new StratifiedPicker(buildDeck(terms));
+  const odds = picker.odds;
+  oddsLine.textContent =
+    `${formatNumber(scopeTerms)} termer · ` +
+    ["green", "yellow", "red"]
+      .filter((s) => s in odds)
+      // Non-breaking spaces keep "rött 10 %" from splitting across lines.
+      .map((s) => `${STATUS_NAME[s]}\u00a0${Math.round(odds[s] * 100)}\u00a0%`)
+      .join(" · ");
+  currentCard = null;
+  if (!panels.practice.hidden) dealNextCard();
+}
+
+// --------------------------------------------------------------- modes
 
 function setMode(mode) {
   for (const [name, button] of Object.entries(modeButtons)) {
     button.setAttribute("aria-pressed", String(name === mode));
     panels[name].hidden = name !== mode;
   }
-  try {
-    localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    // Not worth surfacing: remembering the mode is only a convenience.
-  }
+  writeStore(MODE_KEY, mode);
   if (mode === "practice") {
     if (!currentCard) dealNextCard();
     flashcard.focus({ preventScroll: true });
@@ -215,7 +330,7 @@ function setMode(mode) {
 modeButtons.search.addEventListener("click", () => setMode("search"));
 modeButtons.practice.addEventListener("click", () => setMode("practice"));
 
-// ---------------------------------------------------------- practice
+// ------------------------------------------------------------ practice
 
 function isFlipped() {
   return flashcard.getAttribute("aria-pressed") === "true";
@@ -243,35 +358,37 @@ function showCard(card) {
   flashcard.classList.add("instant");
   setFlipped(false);
 
-  frontDirection.textContent = DIRECTION_LABEL[card.language] ?? "";
-  frontTerm.textContent = card.term;
-  frontTerm.lang = card.language;
-  backTerm.textContent = card.term;
-  backTerm.lang = card.language;
+  frontStatus.className = `status-dot ${card.status}`;
+  frontStatus.title = STATUS_NAME[card.status] ?? "";
+  frontDirection.textContent = DIRECTION_LABEL[card.direction] ?? "";
+  frontTerm.replaceChildren(...card.prompt.map((text) => span(text, "", card.promptLang)));
+  frontTerm.lang = card.promptLang;
+  frontTerm.classList.toggle("long", card.prompt.join(" ").length > 34);
+  backTerm.textContent = card.prompt.join("; ");
+  backTerm.lang = card.promptLang;
   backTranslations.replaceChildren(
-    ...card.translations.map((translation) => span(translation, "", answerLanguage(card))),
-    ...card.notes.map((note) => span(note, "card-note")),
+    ...card.answers.map((text) => span(text, "", card.answerLang)),
+    // Tolerable renderings stay visible, but as the teacher marked them.
+    ...card.tolerable.map((text) => span(`(${text})`, "card-tolerable", card.answerLang)),
   );
+  backTranslations.classList.toggle("long", card.answers.join(" ").length > 60);
 
   void flashcard.offsetWidth; // Commit the instant turn before re-enabling animation.
   flashcard.classList.remove("instant");
 
-  const size = bag.size.toLocaleString("sv-SE");
-  const position = bag.positionInRound.toLocaleString("sv-SE");
-  progress.textContent =
-    bag.round > 1 ? `Kort ${position} av ${size} · omgång ${bag.round}` : `Kort ${position} av ${size}`;
-  announcer.textContent = `${DIRECTION_LABEL[card.language] ?? ""}: ${card.term}`;
+  progress.textContent = `Kort ${formatNumber(picker.shown)}`;
+  announcer.textContent = `${DIRECTION_LABEL[card.direction] ?? ""}: ${card.prompt.join(", ")}`;
 }
 
 function dealNextCard() {
-  showCard(bag.next());
+  if (picker) showCard(picker.next());
 }
 
 function flipCard() {
   if (!currentCard) return;
   const flipped = !isFlipped();
   setFlipped(flipped);
-  announcer.textContent = flipped ? currentCard.translations.join(", ") : currentCard.term;
+  announcer.textContent = flipped ? currentCard.answers.join(", ") : currentCard.prompt.join(", ");
 }
 
 flashcard.addEventListener("click", flipCard);
@@ -288,6 +405,7 @@ document.addEventListener("keydown", (event) => {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+  if (target instanceof HTMLSelectElement) return; // arrows change the chapter there
 
   if (event.key === "ArrowRight" || event.key === "n" || event.key === "N") {
     event.preventDefault();
@@ -300,6 +418,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-
-// Locking discards the decrypted entries along with everything else.
+// Locking discards the decrypted glossary along with everything else.
 $("lock-again").addEventListener("click", () => window.location.reload());

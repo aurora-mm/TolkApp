@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'none'; base-uri 'none'">
   <title>Tolkstöd · Ordlista</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=795672b657">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📘%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -40,6 +40,8 @@
         <button id="lock-again" type="button" class="secondary">Lås</button>
       </div>
 
+      <div id="dictionaries" class="dictionaries" role="group" aria-label="Ordlista"></div>
+
       <div id="panel-search">
         <h2>Snabb ordlisteuppslagning</h2>
         <p class="muted">Sök på svenska, ryska eller latinsk translitterering.</p>
@@ -54,13 +56,17 @@
       </div>
 
       <div id="panel-practice" hidden>
-        <h2>Öva termer</h2>
-        <p class="muted">Tryck på kortet för att vända det.</p>
+        <label for="chapter" class="field-label">Kapitel</label>
+        <select id="chapter" class="chapter-select"></select>
+        <p id="odds" class="muted small odds"></p>
         <button id="flashcard" type="button" class="flashcard" aria-pressed="false"
                 aria-describedby="card-hint">
           <span class="flashcard-inner">
             <span class="face front">
-              <span id="front-direction" class="direction"></span>
+              <span class="card-meta">
+                <span id="front-status" class="status-dot" aria-hidden="true"></span>
+                <span id="front-direction" class="direction"></span>
+              </span>
               <span id="front-term" class="card-term"></span>
             </span>
             <span class="face back" aria-hidden="true">
@@ -82,6 +88,6 @@
 
     <footer class="muted small">Allt dekrypteras lokalt i webbläsaren.</footer>
   </main>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=090bc389ea"></script>
 </body>
 </html>
