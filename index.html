@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'none'; base-uri 'none'">
+  <title>Tolkstöd · Ordlista</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📘%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <main class="shell">
+    <header class="brand">
+      <h1>Tolkstöd</h1>
+      <p>svenska · ryska</p>
+    </header>
+
+    <section id="lock" class="card" aria-labelledby="lock-title">
+      <h2 id="lock-title">Ordlista</h2>
+      <p class="muted">Ange lösenord för att öppna ordlistan.</p>
+      <!-- No name on the field and form-action 'none' in the CSP: if the script
+           ever failed to load, the password still could not end up in a URL. -->
+      <form id="lock-form" autocomplete="on" novalidate>
+        <label for="password">Lösenord</label>
+        <input id="password" type="password" autocomplete="current-password"
+               autocapitalize="off" spellcheck="false" required autofocus>
+        <p id="lock-error" class="error" role="alert" hidden></p>
+        <button id="unlock" type="submit" class="primary">Öppna</button>
+      </form>
+    </section>
+
+    <section id="lookup" class="card" aria-labelledby="lookup-title" hidden>
+      <div class="card-head">
+        <div>
+          <h2 id="lookup-title">Snabb ordlisteuppslagning</h2>
+          <p class="muted">Sök på svenska, ryska eller latinsk translitterering.</p>
+        </div>
+        <button id="lock-again" type="button" class="secondary">Lås</button>
+      </div>
+      <input id="query" type="search" placeholder="Skriv en term …"
+             autocomplete="off" autocapitalize="off" spellcheck="false"
+             enterkeyhint="search" aria-label="Sök term">
+      <table aria-live="polite">
+        <thead><tr><th scope="col">Term</th><th scope="col">Översättning</th></tr></thead>
+        <tbody id="results"></tbody>
+      </table>
+      <p id="status" class="muted small"></p>
+    </section>
+
+    <noscript><p class="card error">Ordlistan kräver JavaScript.</p></noscript>
+
+    <footer class="muted small">Allt dekrypteras lokalt i webbläsaren.</footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
