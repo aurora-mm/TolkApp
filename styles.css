@@ -191,3 +191,171 @@ footer { margin-top: 18px; text-align: center; }
   .card { padding: 18px; border-radius: 12px; }
   th, td { padding: 9px 11px; }
 }
+
+/* ------------------------------------------------------------ modes */
+
+.card-head { align-items: center; }
+
+.modes {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.mode {
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.mode:hover { color: var(--text); }
+
+.mode[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.08), 0 0 0 1px var(--border);
+}
+
+#panel-search h2,
+#panel-practice h2 { margin-top: 4px; }
+
+#panel-search input { margin-top: 14px; }
+
+/* -------------------------------------------------------- flashcard */
+
+.flashcard {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: center;
+  perspective: 1400px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Both faces share one grid cell, so the card is as tall as its longer side.
+   Absolute positioning would clip answers that carry several translations. */
+.flashcard-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.flashcard[aria-pressed="true"] .flashcard-inner { transform: rotateY(180deg); }
+
+/* Changing cards must not animate: the outgoing flip would show the incoming
+   card's answer for a moment on the way round. */
+.flashcard.instant .flashcard-inner { transition: none; }
+
+.face {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 230px;
+  padding: 28px 24px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(16 24 40 / 0.06);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+
+.back {
+  transform: rotateY(180deg);
+  background: var(--surface-raised);
+}
+
+.flashcard:hover .face { border-color: var(--accent); }
+
+.flashcard:focus-visible { outline: none; }
+.flashcard:focus-visible .face {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.direction {
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card-term {
+  font-size: clamp(24px, 6vw, 34px);
+  font-weight: 650;
+  line-height: 1.2;
+  max-width: 100%;
+}
+
+.card-source {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.card-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: clamp(21px, 5vw, 28px);
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--accent);
+  max-width: 100%;
+}
+
+.card-note {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.practice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.practice-bar .primary { min-width: 120px; }
+
+.hint { margin-top: 10px; text-align: center; }
+
+/* Keyboard shortcuts mean nothing on a phone. */
+@media (hover: none) { .hint { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .flashcard-inner { transition: none; }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 520px) {
+  .face { min-height: 200px; padding: 22px 16px; }
+  .mode { padding: 6px 13px; }
+}

@@ -31,22 +31,51 @@
       </form>
     </section>
 
-    <section id="lookup" class="card" aria-labelledby="lookup-title" hidden>
+    <section id="lookup" class="card" aria-label="Ordlista" hidden>
       <div class="card-head">
-        <div>
-          <h2 id="lookup-title">Snabb ordlisteuppslagning</h2>
-          <p class="muted">Sök på svenska, ryska eller latinsk translitterering.</p>
+        <div class="modes" role="group" aria-label="Läge">
+          <button id="mode-search" type="button" class="mode" aria-pressed="true">Sök</button>
+          <button id="mode-practice" type="button" class="mode" aria-pressed="false">Öva</button>
         </div>
         <button id="lock-again" type="button" class="secondary">Lås</button>
       </div>
-      <input id="query" type="search" placeholder="Skriv en term …"
-             autocomplete="off" autocapitalize="off" spellcheck="false"
-             enterkeyhint="search" aria-label="Sök term">
-      <table aria-live="polite">
-        <thead><tr><th scope="col">Term</th><th scope="col">Översättning</th></tr></thead>
-        <tbody id="results"></tbody>
-      </table>
-      <p id="status" class="muted small"></p>
+
+      <div id="panel-search">
+        <h2>Snabb ordlisteuppslagning</h2>
+        <p class="muted">Sök på svenska, ryska eller latinsk translitterering.</p>
+        <input id="query" type="search" placeholder="Skriv en term …"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               enterkeyhint="search" aria-label="Sök term">
+        <table aria-live="polite">
+          <thead><tr><th scope="col">Term</th><th scope="col">Översättning</th></tr></thead>
+          <tbody id="results"></tbody>
+        </table>
+        <p id="status" class="muted small"></p>
+      </div>
+
+      <div id="panel-practice" hidden>
+        <h2>Öva termer</h2>
+        <p class="muted">Tryck på kortet för att vända det.</p>
+        <button id="flashcard" type="button" class="flashcard" aria-pressed="false"
+                aria-describedby="card-hint">
+          <span class="flashcard-inner">
+            <span class="face front">
+              <span id="front-direction" class="direction"></span>
+              <span id="front-term" class="card-term"></span>
+            </span>
+            <span class="face back" aria-hidden="true">
+              <span id="back-term" class="card-source"></span>
+              <span id="back-translations" class="card-answer"></span>
+            </span>
+          </span>
+        </button>
+        <div class="practice-bar">
+          <span id="progress" class="muted small"></span>
+          <button id="next-card" type="button" class="primary">Nästa</button>
+        </div>
+        <p id="card-hint" class="muted small hint">Mellanslag vänder kortet · → nästa kort</p>
+        <p id="card-announcer" class="visually-hidden" aria-live="polite"></p>
+      </div>
     </section>
 
     <noscript><p class="card error">Ordlistan kräver JavaScript.</p></noscript>

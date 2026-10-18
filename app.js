@@ -6,6 +6,7 @@
 // fails AES-GCM's authentication check.
 
 import { TermLookup } from "./lookup.js";
+import { DIRECTION_LABEL, ShuffleBag, answerLanguage, buildCards } from "./practice.js";
 
 const $ = (id) => document.getElementById(id);
 const lockView = $("lock");
@@ -18,7 +19,24 @@ const queryInput = $("query");
 const results = $("results");
 const status = $("status");
 
+const modeButtons = { search: $("mode-search"), practice: $("mode-practice") };
+const panels = { search: $("panel-search"), practice: $("panel-practice") };
+const flashcard = $("flashcard");
+const frontFace = flashcard.querySelector(".front");
+const backFace = flashcard.querySelector(".back");
+const frontDirection = $("front-direction");
+const frontTerm = $("front-term");
+const backTerm = $("back-term");
+const backTranslations = $("back-translations");
+const progress = $("progress");
+const nextCardButton = $("next-card");
+const announcer = $("card-announcer");
+
+const MODE_KEY = "ordlista.mode";
+
 let lookup = null;
+let bag = null;
+let currentCard = null;
 
 // Start downloading while the user types the password.
 const payloadPromise = fetch("dictionary.enc.json", { cache: "no-cache" }).then((response) => {
@@ -149,12 +167,13 @@ form.addEventListener("submit", async (event) => {
       return;
     }
     lookup = new TermLookup(entries);
+    bag = new ShuffleBag(buildCards(entries));
     passwordInput.value = "";
     status.textContent = `${lookup.size.toLocaleString("sv-SE")} termer i ordlistan.`;
     lockView.hidden = true;
     lookupView.hidden = false;
     render();
-    queryInput.focus();
+    setMode(rememberedMode());
   } catch (error) {
     showError(`Ordlistan kunde inte läsas in (${error.message}).`);
   } finally {
@@ -164,6 +183,123 @@ form.addEventListener("submit", async (event) => {
 });
 
 queryInput.addEventListener("input", render);
+
+// ------------------------------------------------------------- modes
+
+function rememberedMode() {
+  try {
+    return localStorage.getItem(MODE_KEY) === "practice" ? "practice" : "search";
+  } catch {
+    return "search"; // Storage can be blocked; the page must still work.
+  }
+}
+
+function setMode(mode) {
+  for (const [name, button] of Object.entries(modeButtons)) {
+    button.setAttribute("aria-pressed", String(name === mode));
+    panels[name].hidden = name !== mode;
+  }
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // Not worth surfacing: remembering the mode is only a convenience.
+  }
+  if (mode === "practice") {
+    if (!currentCard) dealNextCard();
+    flashcard.focus({ preventScroll: true });
+  } else {
+    queryInput.focus();
+  }
+}
+
+modeButtons.search.addEventListener("click", () => setMode("search"));
+modeButtons.practice.addEventListener("click", () => setMode("practice"));
+
+// ---------------------------------------------------------- practice
+
+function isFlipped() {
+  return flashcard.getAttribute("aria-pressed") === "true";
+}
+
+function setFlipped(flipped) {
+  flashcard.setAttribute("aria-pressed", String(flipped));
+  // Only the visible face is exposed to screen readers.
+  frontFace.setAttribute("aria-hidden", String(flipped));
+  backFace.setAttribute("aria-hidden", String(!flipped));
+}
+
+function span(text, className, lang) {
+  const element = document.createElement("span");
+  element.textContent = text;
+  if (className) element.className = className;
+  if (lang) element.lang = lang;
+  return element;
+}
+
+function showCard(card) {
+  currentCard = card;
+  // Turn the card face-up instantly before swapping its contents: animating
+  // that turn would sweep the new card's answer past on the way round.
+  flashcard.classList.add("instant");
+  setFlipped(false);
+
+  frontDirection.textContent = DIRECTION_LABEL[card.language] ?? "";
+  frontTerm.textContent = card.term;
+  frontTerm.lang = card.language;
+  backTerm.textContent = card.term;
+  backTerm.lang = card.language;
+  backTranslations.replaceChildren(
+    ...card.translations.map((translation) => span(translation, "", answerLanguage(card))),
+    ...card.notes.map((note) => span(note, "card-note")),
+  );
+
+  void flashcard.offsetWidth; // Commit the instant turn before re-enabling animation.
+  flashcard.classList.remove("instant");
+
+  const size = bag.size.toLocaleString("sv-SE");
+  const position = bag.positionInRound.toLocaleString("sv-SE");
+  progress.textContent =
+    bag.round > 1 ? `Kort ${position} av ${size} · omgång ${bag.round}` : `Kort ${position} av ${size}`;
+  announcer.textContent = `${DIRECTION_LABEL[card.language] ?? ""}: ${card.term}`;
+}
+
+function dealNextCard() {
+  showCard(bag.next());
+}
+
+function flipCard() {
+  if (!currentCard) return;
+  const flipped = !isFlipped();
+  setFlipped(flipped);
+  announcer.textContent = flipped ? currentCard.translations.join(", ") : currentCard.term;
+}
+
+flashcard.addEventListener("click", flipCard);
+
+nextCardButton.addEventListener("click", () => {
+  dealNextCard();
+  // Keep focus on the card, so Space flips the new card instead of pressing
+  // Nästa again.
+  flashcard.focus({ preventScroll: true });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (panels.practice.hidden || lookupView.hidden) return;
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+
+  if (event.key === "ArrowRight" || event.key === "n" || event.key === "N") {
+    event.preventDefault();
+    dealNextCard();
+    flashcard.focus({ preventScroll: true });
+  } else if (event.key === " " && !(target instanceof HTMLButtonElement)) {
+    // Buttons already turn Space into a click; this covers focus elsewhere.
+    event.preventDefault();
+    flipCard();
+  }
+});
+
 
 // Locking discards the decrypted entries along with everything else.
 $("lock-again").addEventListener("click", () => window.location.reload());
