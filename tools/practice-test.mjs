@@ -11,7 +11,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { decodeGlossary, lookupEntries, termCount, termsInScope } from "../glossary.js";
-import { STATUS_WEIGHT, ShuffleBag, StratifiedPicker, buildDeck } from "../practice.js";
+import {
+  PracticeSession,
+  STATUS_WEIGHT,
+  ShuffleBag,
+  StratifiedPicker,
+  buildDeck,
+  countByColour,
+  filterByColour,
+} from "../practice.js";
 
 let failures = 0;
 function check(name, condition, detail = "") {
@@ -91,6 +99,24 @@ console.log("glossary");
   check("tolerable translations are searchable but flagged",
     entries.some((e) => e.source_term === "титул" && e.translation === "Rubrik" && e.tolerable));
   check("entries carry the term's colour", sv.find((e) => e.source_term === "Fordran").status === "red");
+}
+
+console.log("colour filter");
+{
+  // Statsskick is green in chapter 1 and yellow in chapter 2.
+  const all = termsInScope(fixture, "all");
+  const merged = all.find((t) => t.key === "statsskick");
+  check("a term green in any chapter counts as green", merged.status === "green", merged.status);
+  check("each chapter on its own keeps its own colour", termsInScope(fixture, "2").find((t) => t.key === "statsskick").status === "yellow");
+  const counts = countByColour(all);
+  check("counts cover each colour", counts.all === 4 && counts.green === 1 && counts.yellow === 1 && counts.red === 1, JSON.stringify(counts));
+  check("only green means only green", filterByColour(all, "green").every((t) => t.status === "green") && filterByColour(all, "green").length === 1);
+  check("'all' keeps everything, unmarked included", filterByColour(all, "all").length === 4);
+  check("unmarked terms are not yellow in the filter", !filterByColour(all, "yellow").some((t) => t.status === "none"));
+  const picker = new StratifiedPicker(buildDeck(filterByColour(all, "green")));
+  let others = 0;
+  for (let i = 0; i < 50; i += 1) if (picker.next().status !== "green") others += 1;
+  check("a filtered deck never deals another colour", others === 0 && picker.odds.green === 1);
 }
 
 console.log("deck");
@@ -229,6 +255,37 @@ const fakeCards = (status, count, prefix) =>
   const expected = (1 / 3) * (18 / 118); // yellow's share, split by card count
   check("an unmarked card keeps its own status for display", picker.strata.some((s) => s.bag.items.some((c) => c.status === "none")));
   check("unmarked terms get their share of yellow draws", Math.abs(share - expected) < 0.01, `got ${(share * 100).toFixed(1)}%, want ${(expected * 100).toFixed(1)}%`);
+}
+
+console.log("PracticeSession");
+{
+  const picker = new StratifiedPicker(fakeCards("green", 40, "g"), { random: seeded(3) });
+  const session = new PracticeSession(picker);
+  check("nothing to go back to at the start", !session.canGoBack && session.current === null);
+  const first = session.next();
+  check("the first card has nothing before it", !session.canGoBack && session.back() === first);
+  const second = session.next();
+  const third = session.next();
+  check("back shows the previous card", session.back() === second && session.position === 2);
+  check("back reaches the first card and stops there", session.back() === first && !session.canGoBack && session.back() === first);
+  const shownBefore = picker.shown;
+  check("next walks forward through what was seen", session.next() === second && session.next() === third);
+  check("stepping through history draws nothing new", picker.shown === shownBefore && session.seen === 3);
+  const fourth = session.next();
+  check("past the end of history, next draws a new card",
+    picker.shown === shownBefore + 1 && fourth !== third && session.position === 4 && session.seen === 4);
+}
+{
+  const picker = new StratifiedPicker(fakeCards("green", 12, "g"), { random: seeded(4) });
+  const session = new PracticeSession(picker);
+  const plain = new StratifiedPicker(fakeCards("green", 12, "g"), { random: seeded(4) });
+  const expected = Array.from({ length: 40 }, () => plain.next().termKey);
+  const dealt = [];
+  for (let i = 0; i < 40; i += 1) {
+    dealt.push(session.next().termKey);
+    if (i % 3 === 2) { session.back(); session.back(); session.next(); session.next(); }
+  }
+  check("going back never changes the order of new cards", dealt.join() === expected.join());
 }
 
 const here = dirname(fileURLToPath(import.meta.url));

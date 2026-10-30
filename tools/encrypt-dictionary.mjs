@@ -12,14 +12,17 @@
 //
 // Usage:
 //   python tools/parse_facit.py                  # src/*.pdf -> build/glossary.json
-//   node tools/encrypt-dictionary.mjs            # build/glossary.json -> dictionary.enc.json
+//   python tools/build_book.py                   # build/glossary.json -> build/book/*.pdf
+//   node tools/encrypt-dictionary.mjs            # both -> dictionary.enc.json, book/*.enc
 //   DICT_PASSWORD=... node tools/encrypt-dictionary.mjs   (non-interactive)
 //
 // The input is the glossary parsed from the teacher's facit PDFs: four
 // dictionaries, each split into chapters, each term carrying its colour
-// status, its correct translations and any merely tolerable ones.
+// status, its correct translations and any merely tolerable ones. The PDF
+// books are sealed with the same key, one file each, so the page fetches them
+// only when someone asks for one.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -37,6 +40,7 @@ const ITERATIONS = 600_000;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const output = resolve(here, "..", "dictionary.enc.json");
+const bookOutput = resolve(here, "..", "book");
 const defaultSource = resolve(here, "..", "build", "glossary.json");
 
 const STATUS_CODE = { green: "g", yellow: "y", red: "r" };
@@ -104,9 +108,47 @@ async function deriveKey(password, salt) {
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 
+function loadBookManifest(source) {
+  const folder = join(dirname(source), "book");
+  const path = join(folder, "manifest.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`no books in ${folder}; run tools/build_book.py first`);
+  }
+  // A book left over from an earlier parse would disagree with the glossary.
+  if (statSync(path).mtimeMs < statSync(source).mtimeMs) {
+    throw new Error(`${path} is older than ${source}; run tools/build_book.py again`);
+  }
+  return { folder, manifest };
+}
+
+// Each file is its IV followed by the ciphertext. PDFs are compressed already,
+// so unlike the glossary they are not gzipped first.
+async function sealBooks(key, { folder, manifest }) {
+  rmSync(bookOutput, { recursive: true, force: true });
+  mkdirSync(bookOutput);
+  const sealed = [];
+  for (const item of manifest) {
+    const pdf = readFileSync(join(folder, item.pdf));
+    const iv = getRandomValues(new Uint8Array(12));
+    const ciphertext = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, pdf));
+    const check = await subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    if (Buffer.compare(Buffer.from(check), pdf) !== 0) {
+      throw new Error(`round-trip check failed for ${item.pdf}`);
+    }
+    const file = `book/${item.id}.enc`;
+    writeFileSync(join(bookOutput, `${item.id}.enc`), Buffer.concat([iv, ciphertext]));
+    sealed.push({ id: item.id, file, name: item.name, pages: item.pages, size: pdf.length });
+  }
+  return sealed;
+}
+
 async function main() {
   const source = resolve(process.argv[2] ?? defaultSource);
   const { content, terms } = loadGlossary(source);
+  const books = loadBookManifest(source);
 
   let password = process.env.DICT_PASSWORD;
   if (!password) {
@@ -116,13 +158,14 @@ async function main() {
   }
   if (!password) throw new Error("empty password");
 
-  // Compressed before encryption, because ciphertext does not compress and
-  // GitHub Pages' own gzip would then do nothing.
-  const plaintext = gzipSync(Buffer.from(JSON.stringify(content), "utf8"), { level: 9 });
-
   const salt = getRandomValues(new Uint8Array(16));
   const iv = getRandomValues(new Uint8Array(12));
   const key = await deriveKey(password, salt);
+  content.book = await sealBooks(key, books);
+
+  // Compressed before encryption, because ciphertext does not compress and
+  // GitHub Pages' own gzip would then do nothing.
+  const plaintext = gzipSync(Buffer.from(JSON.stringify(content), "utf8"), { level: 9 });
   const ciphertext = new Uint8Array(
     await subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext),
   );
@@ -143,7 +186,8 @@ async function main() {
   writeFileSync(output, JSON.stringify(payload));
   console.log(
     `${terms} terms in ${content.dictionaries.length} dictionaries from ${source}\n` +
-      `-> ${output} (${(JSON.stringify(payload).length / 1024).toFixed(0)} KB)`,
+      `-> ${output} (${(JSON.stringify(payload).length / 1024).toFixed(0)} KB)\n` +
+      `-> ${bookOutput} (${content.book.length} PDFs)`,
   );
 }
 

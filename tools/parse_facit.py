@@ -269,10 +269,27 @@ def cell_glyphs(chars: list[Char]) -> list[Glyph]:
 ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"), None)
 
 
+# Latin letters a Russian keyboard user can type by accident, because they look
+# identical: "cтуденческие" opens with a Latin c. Only a word that already mixes
+# both scripts is touched, so "LMA-карт" and real Latin words are left alone.
+HOMOGLYPHS = str.maketrans("aceopxyACEHKMOPTXY", "асеорхуАСЕНКМОРТХУ")
+MIXED_WORD = re.compile(r"[A-Za-z\u0400-\u04ff]+")
+
+
+def repair_word(match: re.Match[str]) -> str:
+    word = match.group()
+    latin = {ch for ch in word if ch.isascii()}
+    cyrillic = len(latin) < len(set(word))
+    if latin and cyrillic and all(ch in "aceopxyACEHKMOPTXY" for ch in latin):
+        return word.translate(HOMOGLYPHS)
+    return word
+
+
 def tidy(text: str) -> str:
     # The migration PDFs follow every row number with U+200B ZERO WIDTH SPACE,
     # which made "1.\u200b" fail to read as a row number at all.
     text = unicodedata.normalize("NFC", text).translate(ZERO_WIDTH)
+    text = MIXED_WORD.sub(repair_word, text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+([,.;:!?)\]»”])", r"\1", text)
     text = re.sub(r"([(\[«„])\s+", r"\1", text)
