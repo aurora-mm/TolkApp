@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'none'; base-uri 'none'">
   <title>Tolkstöd · Ordlista</title>
-  <link rel="stylesheet" href="styles.css?v=795672b657">
+  <link rel="stylesheet" href="styles.css?v=80d98b15da">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📘%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -58,6 +58,12 @@
       <div id="panel-practice" hidden>
         <label for="chapter" class="field-label">Kapitel</label>
         <select id="chapter" class="chapter-select"></select>
+        <div id="colours" class="colours" role="group" aria-label="Färg">
+          <button type="button" class="colour" data-colour="all" aria-pressed="true">Alla</button>
+          <button type="button" class="colour" data-colour="green" aria-pressed="false"><span class="status-dot green" aria-hidden="true"></span>Grönt</button>
+          <button type="button" class="colour" data-colour="yellow" aria-pressed="false"><span class="status-dot yellow" aria-hidden="true"></span>Gult</button>
+          <button type="button" class="colour" data-colour="red" aria-pressed="false"><span class="status-dot red" aria-hidden="true"></span>Rött</button>
+        </div>
         <p id="odds" class="muted small odds"></p>
         <button id="flashcard" type="button" class="flashcard" aria-pressed="false"
                 aria-describedby="card-hint">
@@ -76,11 +82,21 @@
           </span>
         </button>
         <div class="practice-bar">
+          <button id="previous-card" type="button" class="secondary" disabled>Föregående</button>
           <span id="progress" class="muted small"></span>
           <button id="next-card" type="button" class="primary">Nästa</button>
         </div>
-        <p id="card-hint" class="muted small hint">Mellanslag vänder kortet · → nästa kort</p>
+        <p id="card-hint" class="muted small hint">Mellanslag vänder kortet · ← → byter kort</p>
         <p id="card-announcer" class="visually-hidden" aria-live="polite"></p>
+      </div>
+
+      <div id="downloads" class="downloads" hidden>
+        <p class="muted small">Ordbok som PDF, i bokstavsordning</p>
+        <div class="download-row">
+          <button id="download-current" type="button" class="secondary"></button>
+          <button id="download-all" type="button" class="secondary"></button>
+        </div>
+        <p id="download-error" class="error" role="alert" hidden></p>
       </div>
     </section>
 
@@ -88,6 +104,6 @@
 
     <footer class="muted small">Allt dekrypteras lokalt i webbläsaren.</footer>
   </main>
-  <script type="module" src="app.js?v=090bc389ea"></script>
+  <script type="module" src="app.js?v=f8ccc08550"></script>
 </body>
 </html>

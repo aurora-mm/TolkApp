@@ -487,3 +487,70 @@ tr.tolerable td:last-child::after {
    hyphenated lines on a phone. Long text steps down a size. */
 .card-term.long { font-size: clamp(19px, 4.8vw, 26px); }
 .card-answer.long { font-size: clamp(17px, 4.2vw, 22px); }
+
+/* ---------------------------------------------------- colour filter */
+
+.colours {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 3px;
+  margin-top: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.colour {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 2px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.colour .status-dot { width: 8px; height: 8px; }
+.colour:hover:not(:disabled) { color: var(--text); }
+
+.colour[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.08), 0 0 0 1px var(--border);
+}
+
+/* Not waiting for anything, just unavailable: no "progress" cursor. */
+.colour:disabled,
+.secondary:disabled { cursor: default; opacity: 0.45; }
+
+/* ------------------------------------------------------- practice bar */
+
+.practice-bar .primary,
+.practice-bar .secondary { min-width: 118px; padding: 10px 14px; }
+
+@media (max-width: 520px) {
+  .practice-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .practice-bar .primary,
+  .practice-bar .secondary { min-width: 0; }
+  #progress { grid-row: 2; grid-column: 1 / -1; text-align: center; }
+}
+
+/* ---------------------------------------------------------- downloads */
+
+.downloads {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.downloads .muted { margin: 0 0 8px; }
+.download-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.download-row .secondary { font-size: 14px; }
+.downloads .error { margin-top: 8px; }

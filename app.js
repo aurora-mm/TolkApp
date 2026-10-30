@@ -5,9 +5,16 @@
 // dictionary.enc.json or it does not. A wrong password is simply a key that
 // fails AES-GCM's authentication check.
 
-import { decodeGlossary, lookupEntries, termsInScope } from "./glossary.js?v=0dab3c2a08";
+import { decodeGlossary, lookupEntries, termsInScope } from "./glossary.js?v=375b3d8b2e";
 import { TermLookup } from "./lookup.js?v=a14f613f27";
-import { DIRECTION_LABEL, StratifiedPicker, buildDeck } from "./practice.js?v=68b69f5c26";
+import {
+  DIRECTION_LABEL,
+  PracticeSession,
+  StratifiedPicker,
+  buildDeck,
+  countByColour,
+  filterByColour,
+} from "./practice.js?v=f2008d45da";
 
 const $ = (id) => document.getElementById(id);
 const lockView = $("lock");
@@ -21,7 +28,12 @@ const results = $("results");
 const status = $("status");
 const dictionaryBar = $("dictionaries");
 const chapterSelect = $("chapter");
+const colourBar = $("colours");
 const oddsLine = $("odds");
+const downloads = $("downloads");
+const downloadCurrent = $("download-current");
+const downloadAll = $("download-all");
+const downloadError = $("download-error");
 
 const modeButtons = { search: $("mode-search"), practice: $("mode-practice") };
 const panels = { search: $("panel-search"), practice: $("panel-practice") };
@@ -35,21 +47,16 @@ const backTerm = $("back-term");
 const backTranslations = $("back-translations");
 const progress = $("progress");
 const nextCardButton = $("next-card");
+const previousCardButton = $("previous-card");
 const announcer = $("card-announcer");
 
 // Only selections are remembered, never any of the glossary itself.
 const MODE_KEY = "ordlista.mode";
 const DICTIONARY_KEY = "ordlista.dictionary";
 const CHAPTERS_KEY = "ordlista.chapters";
+const COLOUR_KEY = "ordlista.colour";
 
 const STATUS_NAME = { green: "grönt", yellow: "gult", red: "rött", none: "omärkt" };
-
-let glossary = [];
-let dictionary = null;
-const lookups = new Map();
-let picker = null;
-let scopeTerms = 0;
-let currentCard = null;
 
 // Start downloading while the user types the password.
 const payloadPromise = fetch("dictionary.enc.json", { cache: "no-cache" }).then((response) => {
@@ -76,6 +83,17 @@ function writeStore(key, value) {
     // Not worth surfacing: remembering selections is only a convenience.
   }
 }
+
+let glossary = [];
+let dictionary = null;
+const lookups = new Map();
+let session = null;
+let colourFilter = readStore(COLOUR_KEY, "all");
+let currentCard = null;
+// Kept for the PDF downloads, which are encrypted with the same key. It cannot
+// be exported from the browser, and Lås discards it with the rest of the page.
+let glossaryKey = null;
+let book = [];
 
 function showError(message) {
   errorBox.textContent = message;
@@ -123,7 +141,8 @@ async function unlock(password) {
   } catch {
     return null; // Authentication failed: wrong password.
   }
-  return decodeGlossary(JSON.parse(await gunzip(plaintext)));
+  const content = JSON.parse(await gunzip(plaintext));
+  return { key, book: content.book ?? [], dictionaries: decodeGlossary(content) };
 }
 
 form.addEventListener("submit", async (event) => {
@@ -143,13 +162,15 @@ form.addEventListener("submit", async (event) => {
   unlockButton.disabled = true;
   unlockButton.textContent = "Öppnar …";
   try {
-    const decoded = await unlock(password);
-    if (!decoded) {
+    const unlocked = await unlock(password);
+    if (!unlocked) {
       showError("Fel lösenord.");
       passwordInput.select();
       return;
     }
-    glossary = decoded;
+    glossary = unlocked.dictionaries;
+    glossaryKey = unlocked.key;
+    book = unlocked.book;
     passwordInput.value = "";
     buildDictionaryBar();
     lockView.hidden = true;
@@ -199,6 +220,7 @@ function selectDictionary(id) {
   status.textContent = `${formatNumber(termsInScope(dictionary).length)} termer i ${dictionary.name}.`;
   renderSearch();
   buildChapterSelect();
+  updateDownloads();
 }
 
 // -------------------------------------------------------------- search
@@ -297,19 +319,41 @@ chapterSelect.addEventListener("change", () => {
 
 function rebuildDeck() {
   const terms = termsInScope(dictionary, chapterSelect.value);
-  scopeTerms = terms.length;
-  picker = new StratifiedPicker(buildDeck(terms));
+  const counts = countByColour(terms);
+  // A chapter with no red terms cannot be practised as "only red".
+  if (!counts[colourFilter]) colourFilter = "all";
+  for (const button of colourBar.children) {
+    const colour = button.dataset.colour;
+    button.setAttribute("aria-pressed", String(colour === colourFilter));
+    button.disabled = !counts[colour];
+    button.title = `${formatNumber(counts[colour] ?? 0)} termer`;
+  }
+
+  const chosen = filterByColour(terms, colourFilter);
+  const picker = new StratifiedPicker(buildDeck(chosen));
+  session = new PracticeSession(picker);
   const odds = picker.odds;
-  oddsLine.textContent =
-    `${formatNumber(scopeTerms)} termer · ` +
-    ["green", "yellow", "red"]
-      .filter((s) => s in odds)
-      // Non-breaking spaces keep "rött 10 %" from splitting across lines.
-      .map((s) => `${STATUS_NAME[s]}\u00a0${Math.round(odds[s] * 100)}\u00a0%`)
-      .join(" · ");
+  const detail =
+    colourFilter === "all"
+      ? ["green", "yellow", "red"]
+          .filter((s) => s in odds)
+          // Non-breaking spaces keep "rött 10 %" from splitting across lines.
+          .map((s) => `${STATUS_NAME[s]}\u00a0${Math.round(odds[s] * 100)}\u00a0%`)
+          .join(" · ")
+      : `bara ${STATUS_NAME[colourFilter]}`;
+  oddsLine.textContent = `${formatNumber(chosen.length)} termer · ${detail}`;
   currentCard = null;
   if (!panels.practice.hidden) dealNextCard();
 }
+
+colourBar.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+  colourFilter = button.dataset.colour;
+  writeStore(COLOUR_KEY, colourFilter);
+  rebuildDeck();
+  flashcard.focus({ preventScroll: true });
+});
 
 // --------------------------------------------------------------- modes
 
@@ -376,12 +420,21 @@ function showCard(card) {
   void flashcard.offsetWidth; // Commit the instant turn before re-enabling animation.
   flashcard.classList.remove("instant");
 
-  progress.textContent = `Kort ${formatNumber(picker.shown)}`;
+  // While stepping back, show where in the sitting this card sits.
+  progress.textContent =
+    session.position < session.seen
+      ? `Kort ${formatNumber(session.position)} av ${formatNumber(session.seen)}`
+      : `Kort ${formatNumber(session.position)}`;
+  previousCardButton.disabled = !session.canGoBack;
   announcer.textContent = `${DIRECTION_LABEL[card.direction] ?? ""}: ${card.prompt.join(", ")}`;
 }
 
 function dealNextCard() {
-  if (picker) showCard(picker.next());
+  if (session) showCard(session.next());
+}
+
+function showPreviousCard() {
+  if (session?.canGoBack) showCard(session.back());
 }
 
 function flipCard() {
@@ -400,6 +453,13 @@ nextCardButton.addEventListener("click", () => {
   flashcard.focus({ preventScroll: true });
 });
 
+previousCardButton.addEventListener("click", () => {
+  showPreviousCard();
+  // Keep Space on the card here too. The button also disables itself on the
+  // first card, and a disabled button would drop focus to the page.
+  flashcard.focus({ preventScroll: true });
+});
+
 document.addEventListener("keydown", (event) => {
   if (panels.practice.hidden || lookupView.hidden) return;
   if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -411,11 +471,72 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     dealNextCard();
     flashcard.focus({ preventScroll: true });
+  } else if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    showPreviousCard();
+    flashcard.focus({ preventScroll: true });
   } else if (event.key === " " && !(target instanceof HTMLButtonElement)) {
     // Buttons already turn Space into a click; this covers focus elsewhere.
     event.preventDefault();
     flipCard();
   }
+});
+
+// ----------------------------------------------------------- PDF downloads
+
+const formatSize = (bytes) =>
+  `${(bytes / 1_000_000).toLocaleString("sv-SE", { maximumFractionDigits: 1 })}\u00a0MB`;
+
+function setDownload(button, item, label) {
+  button.hidden = !item;
+  if (item) button.textContent = `${label} (${item.pages} s., ${formatSize(item.size)})`;
+}
+
+function updateDownloads() {
+  const current = book.find((item) => item.id === dictionary.id);
+  const whole = book.find((item) => item.id === "all");
+  setDownload(downloadCurrent, current, dictionary.name);
+  setDownload(downloadAll, whole, "Hela ordboken");
+  downloads.hidden = !current && !whole;
+}
+
+// The books are encrypted like the glossary and only decrypted here, so the
+// published site never holds a readable copy.
+async function downloadBook(item, button) {
+  const label = button.textContent;
+  downloadError.hidden = true;
+  button.disabled = true;
+  button.textContent = "Hämtar …";
+  try {
+    const response = await fetch(item.file, { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const sealed = new Uint8Array(await response.arrayBuffer());
+    const pdf = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: sealed.subarray(0, 12) },
+      glossaryKey,
+      sealed.subarray(12),
+    );
+    const url = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+    const link = Object.assign(document.createElement("a"), { href: url, download: item.name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch {
+    // A failed decrypt here means the site was rebuilt after this page loaded.
+    downloadError.textContent = "PDF:en kunde inte hämtas. Ladda om sidan och försök igen.";
+    downloadError.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+downloadCurrent.addEventListener("click", () => {
+  downloadBook(book.find((item) => item.id === dictionary.id), downloadCurrent);
+});
+downloadAll.addEventListener("click", () => {
+  downloadBook(book.find((item) => item.id === "all"), downloadAll);
 });
 
 // Locking discards the decrypted glossary along with everything else.

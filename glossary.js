@@ -6,6 +6,11 @@ export const STATUS = { g: "green", y: "yellow", r: "red", "": "none" };
 
 const casefold = (value) => value.toLowerCase().replaceAll("ß", "ss");
 
+// A term can carry different colours in different chapters (16 do). Green
+// anywhere counts as green, so "only green" over all chapters does not lose it.
+const GREENNESS = { green: 0, yellow: 1, red: 2, none: 3 };
+const greener = (a, b) => (GREENNESS[b] < GREENNESS[a] ? b : a);
+
 // Expand the compact payload ([sv, status, [correct], [tolerable]]) into
 // objects the rest of the page can read.
 export function decodeGlossary(content) {
@@ -48,6 +53,7 @@ export function termsInScope(dictionary, chapterId = "all") {
         merged.set(key, { ...term, key, ru: [...term.ru], tolerable: [...term.tolerable] });
         continue;
       }
+      existing.status = greener(existing.status, term.status);
       for (const text of term.ru) {
         if (!existing.ru.some((t) => casefold(t) === casefold(text))) existing.ru.push(text);
       }
@@ -76,6 +82,7 @@ export function lookupEntries(dictionary) {
     if (existing) {
       // Tolerable in one chapter but correct in another: it is correct.
       if (!tolerable) existing.tolerable = false;
+      existing.status = greener(existing.status, status);
       return;
     }
     const entry = { source_term, translation, language, notes: "", status, tolerable };

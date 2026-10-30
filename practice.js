@@ -18,6 +18,22 @@ export const DIRECTION_LABEL = {
   ru: "Ryska → svenska",
 };
 
+// The colour filter in Öva. Exact colours only: unmarked terms ride with yellow
+// in the draw, but "Gult" must not show cards that are not yellow.
+export const COLOUR_FILTERS = ["all", "green", "yellow", "red"];
+
+export function filterByColour(terms, colour) {
+  return colour === "all" ? terms : terms.filter((term) => term.status === colour);
+}
+
+export function countByColour(terms) {
+  const counts = { all: terms.length, green: 0, yellow: 0, red: 0 };
+  for (const term of terms) {
+    if (term.status in counts) counts[term.status] += 1;
+  }
+  return counts;
+}
+
 // Two cards per term, one each way. A term with only tolerable Russian gets no
 // Russian-to-Swedish card: a tolerable rendering is not something to prompt with.
 export function buildDeck(terms) {
@@ -116,8 +132,8 @@ export class ShuffleBag {
 
 // Stratified draw: pick a colour by weight, then the next card of that colour
 // from its own shuffle bag. Weighting whole colours rather than single cards is
-// what makes red rare however many red terms a chapter has: Juridik has 351 red
-// terms to 572 green, and per-card weights would still serve red a third of
+// what makes red rare however many red terms a chapter has: Juridik has 421 red
+// terms to 667 green, and per-card weights would still serve red a third of
 // the time. Colours absent from the deck drop out and the rest share the odds.
 export class StratifiedPicker {
   constructor(cards, { weights = STATUS_WEIGHT, random = Math.random } = {}) {
@@ -178,5 +194,45 @@ export class StratifiedPicker {
       if (roll < 0) return stratum;
     }
     return strata[strata.length - 1];
+  }
+}
+
+// What has been shown in one sitting, so Föregående can step back through it.
+// Like a browser's history: after going back, next() walks forward over the
+// cards already seen before asking the picker for a new one. The picker is left
+// alone while stepping, so going back never changes what gets drawn or counted.
+export class PracticeSession {
+  constructor(picker) {
+    this.picker = picker;
+    this.history = [];
+    this.index = -1;
+  }
+
+  get current() {
+    return this.history[this.index] ?? null;
+  }
+
+  // 1-based place of the current card, and how many have been shown so far.
+  get position() {
+    return this.index + 1;
+  }
+
+  get seen() {
+    return this.history.length;
+  }
+
+  get canGoBack() {
+    return this.index > 0;
+  }
+
+  next() {
+    if (this.index === this.history.length - 1) this.history.push(this.picker.next());
+    this.index += 1;
+    return this.current;
+  }
+
+  back() {
+    if (this.canGoBack) this.index -= 1;
+    return this.current;
   }
 }
