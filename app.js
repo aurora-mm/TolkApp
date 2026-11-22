@@ -14,7 +14,7 @@ import {
   buildDeck,
   countByColour,
   filterByColour,
-} from "./practice.js?v=f2008d45da";
+} from "./practice.js?v=70733c5931";
 
 const $ = (id) => document.getElementById(id);
 const lockView = $("lock");

@@ -132,9 +132,10 @@ export class ShuffleBag {
 
 // Stratified draw: pick a colour by weight, then the next card of that colour
 // from its own shuffle bag. Weighting whole colours rather than single cards is
-// what makes red rare however many red terms a chapter has: Juridik has 421 red
-// terms to 667 green, and per-card weights would still serve red a third of
-// the time. Colours absent from the deck drop out and the rest share the odds.
+// what makes red rare however many red terms a chapter has: Juridik has 503 red
+// terms to 1 038 green, and per-card weights would still serve red over a
+// quarter of the time. Colours absent from the deck drop out and the rest
+// share the odds.
 export class StratifiedPicker {
   constructor(cards, { weights = STATUS_WEIGHT, random = Math.random } = {}) {
     if (cards.length === 0) throw new Error("StratifiedPicker needs at least one card");
